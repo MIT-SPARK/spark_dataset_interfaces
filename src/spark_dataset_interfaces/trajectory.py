@@ -41,7 +41,7 @@ class Pose:
     @classmethod
     def from_flattened(cls, pos_arr: np.ndarray, order="xyzw") -> "Pose":
         """Reconstruct a pose from a [x y z q[order]] array."""
-        pos = pos_arr[:3]
+        pos = np.array(pos_arr[:3])
         rot = Rotation.from_quat([pos_arr[3 + order.find(dim)] for dim in "xyzw"])
         return cls(rot, pos)
 
@@ -66,12 +66,29 @@ class Pose:
         q = Rotation.from_matrix(a_T_c[:3, :3])
         return Pose(rotation=q, translation=t)
 
+    def between(self, other: "Pose") -> "Pose":
+        """Get the pose self^-1 * other."""
+        return self.inverse() @ other
+
     def flatten(self) -> np.ndarray:
         """Get the pose as a [x y z qx qy qz qw] array."""
         pose_arr = np.zeros(7)
         pose_arr[:3] = self.translation
         pose_arr[3:] = self.rotation.as_quat()
         return pose_arr
+
+    def inverse(self) -> "Pose":
+        """Get the inverse of the current pose."""
+        R_inv = self.rotation.inv()
+        return Pose(R_inv, R_inv.apply(-self.translation))
+
+    def __matmul__(self, other):
+        """Compose this pose with another."""
+        return self.compose(other)
+
+    def __mul__(self, other):
+        """Compose this pose with another."""
+        return self.compose(other)
 
 
 class Trajectory:

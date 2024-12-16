@@ -6,7 +6,8 @@ from typing import Any, Dict
 
 import numpy as np
 import tqdm
-from scipy.spatial.transform import Rotation  # type: ignore
+
+from spark_dataset_interfaces.trajectory import Pose
 
 
 @dataclass
@@ -14,8 +15,7 @@ class InputPacket:
     """Input packet for hydra."""
 
     timestamp: int
-    world_q_body: np.ndarray
-    world_t_body: np.ndarray
+    pose: Pose
     color: np.ndarray
     depth: np.ndarray
     labels: np.ndarray
@@ -24,11 +24,7 @@ class InputPacket:
     @property
     def world_T_body(self):
         """Get homogeneous transform."""
-        q_xyzw = np.roll(self.world_q_body, -1)
-        world_T_body = np.eye(4)
-        world_T_body[:3, 3] = self.world_t_body
-        world_T_body[:3, :3] = Rotation.from_quat(q_xyzw).as_matrix()
-        return world_T_body
+        return self.pose.matrix()
 
 
 class DataLoader(abc.ABC):
