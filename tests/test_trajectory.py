@@ -1,5 +1,5 @@
 """Test trajectory class."""
-from spark_data_interfaces import Trajectory
+from spark_dataset_interfaces import Trajectory
 import numpy as np
 
 

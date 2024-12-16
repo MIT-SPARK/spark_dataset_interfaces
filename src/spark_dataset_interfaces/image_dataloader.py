@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import numpy as np
 import tqdm
-from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Rotation  # type: ignore
 
 
 @dataclass
@@ -27,7 +27,7 @@ class InputPacket:
         q_xyzw = np.roll(self.world_q_body, -1)
         world_T_body = np.eye(4)
         world_T_body[:3, 3] = self.world_t_body
-        world_T_body[:3, :3] = R.from_quat(q_xyzw).as_matrix()
+        world_T_body[:3, :3] = Rotation.from_quat(q_xyzw).as_matrix()
         return world_T_body
 
 

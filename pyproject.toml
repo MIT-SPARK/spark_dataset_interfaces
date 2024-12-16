@@ -10,10 +10,36 @@ dependencies = [
     "numpy",
     "pandas",
     "scipy",
+    "tqdm",
+    "pyyaml",
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.isort]
 profile = "black"
+
+
+[tool.tox]
+requires = ["tox>=4"]
+skip_missing_interpreters = true
+env_list = ["type", "3.8", "3.9", "3.10"]
+
+[tool.tox.env_run_base]
+description = "run unit tests"
+deps = [
+    "pytest>=8",
+    "pytest-sugar"
+]
+commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
+
+[tool.tox.env.type]
+description = "run type checks"
+deps = ["mypy"]
+commands = [
+    ["mypy", "--install-types", "--non-interactive", { replace = "posargs", default = ["src", "tests"], extend = true}],
+]

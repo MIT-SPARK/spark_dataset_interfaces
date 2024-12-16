@@ -2,15 +2,13 @@
 
 import bisect
 import pathlib
-import typing
 from dataclasses import dataclass, field
 from os import PathLike
 from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-import spark_dsg as dsg
-from scipy.spatial.transform import Rotation, Slerp
+from scipy.spatial.transform import Rotation, Slerp  # type: ignore
 
 DEFAULT_HEADER_ORDER = ["px", "py", "pz", "qw", "qx", "qy", "qz"]
 
@@ -31,7 +29,9 @@ class Pose:
     translation: np.ndarray = field(default_factory=lambda: np.zeros((3, 1)))
 
     @classmethod
-    def from_4dof(cls, pos: np.ndarray, yaw: float, b_R_s: Optional[np.ndarray] = None):
+    def from_4dof(
+        cls, pos: np.ndarray, yaw: float, b_R_s: Optional[np.ndarray] = None
+    ) -> "Pose":
         """Construct a pose from a 3D position and yaw (with optional extrinsics)."""
         # we assume yaw around z-axis in ENU
         w_R_b = Rotation.from_quat([0.0, 0.0, np.sin(yaw / 2.0), np.cos(yaw / 2.0)])
@@ -39,20 +39,13 @@ class Pose:
         return cls(w_R_s, pos.reshape((3, 1)))
 
     @classmethod
-    def from_flattened(cls, pos_arr: np.ndarray, order="xyzw"):
+    def from_flattened(cls, pos_arr: np.ndarray, order="xyzw") -> "Pose":
         """Reconstruct a pose from a [x y z q[order]] array."""
         pos = pos_arr[:3]
         rot = Rotation.from_quat([pos_arr[3 + order.find(dim)] for dim in "xyzw"])
         return cls(rot, pos)
 
-    @classmethod
-    def from_agent_attributes(cls, attrs: dsg.AgentNodeAttributes):
-        """Reconstruct a pose from scene graph attributes."""
-        q = attrs.world_R_body
-        q = [q.x, q.y, q.z, q.w]
-        return cls(Rotation.from_quat(q), attrs.position)
-
-    def interp(self, other: typing.Self, ratio: float) -> typing.Self:
+    def interp(self, other: "Pose", ratio: float) -> "Pose":
         """Linearly interpolate two poses."""
         ratio = np.clip(ratio, 0, 1)
         slerp = Slerp([0.0, 1.0], Rotation.concatenate([self.rotation, other.rotation]))
@@ -66,7 +59,7 @@ class Pose:
         T[:3, 3] = np.squeeze(self.translation)
         return T
 
-    def compose(self, b_T_c: typing.Self) -> typing.Self:
+    def compose(self, b_T_c: "Pose") -> "Pose":
         """Compose pose with other pose (i.e., a_T_b * b_T_c = a_T_c)."""
         a_T_c = self.matrix() @ b_T_c.matrix()
         t = a_T_c[:3, 3]
@@ -189,17 +182,8 @@ class Trajectory:
             pose_cols = ["x", "y", "z", "qx", "qy", "qz", "qw"]
 
         poses = df[pose_cols].to_numpy()
-        poses = [Pose.from_flattened(x) for x in poses]
-        return cls(np.array(df[time_col].to_numpy(), dtype=np.int64), poses)
-
-    @classmethod
-    def from_scene_graph(cls, filepath, agent_prefix="a"):
-        """Construct a trajectory from a previous scene graph."""
-        G = dsg.DynamicSceneGraph.load(_check_file(filepath))
-        agents = G.get_layer(dsg.DsgLayers.AGENTS, agent_prefix)
-        times = [x.attributes.timestamp for x in agents.nodes]
-        poses = [Pose.from_agent_attributes(x.attributes) for x in agents.nodes]
-        return cls(times, poses)
+        pose_list = [Pose.from_flattened(x) for x in poses]
+        return cls(np.array(df[time_col].to_numpy(), dtype=np.int64), pose_list)
 
     @classmethod
     def rotate(
