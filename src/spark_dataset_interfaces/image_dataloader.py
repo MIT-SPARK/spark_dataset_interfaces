@@ -60,9 +60,10 @@ class DataLoader(abc.ABC):
         data_callbacks = [] if data_callbacks is None else data_callbacks
         step_callbacks = [] if step_callbacks is None else step_callbacks
 
-        data_iter = DataLoaderIter(data)
+        data_iter = iter(data)
         data_iter = tqdm.tqdm(data_iter) if show_progress else data_iter
         for idx, packet in enumerate(data_iter):
+            print(idx, packet)
             if max_steps and idx >= max_steps:
                 return
 
@@ -81,23 +82,3 @@ class DataLoader(abc.ABC):
 
             for func in step_callbacks:
                 func(pipeline.graph)
-
-
-class DataLoaderIter:
-    """Iterator over dataloader."""
-
-    def __init__(self, data):
-        """Make a iterator from an underlying dataloader."""
-        self._data = data
-        self._data.reset()
-
-    def __len__(self):
-        """Get the dataloader length if it exists."""
-        return len(self._data)
-
-    def __iter__(self):
-        """Iterate through the dataloader."""
-        value = self._data.next()
-        while value is not None:
-            yield value
-            value = self._data.next()

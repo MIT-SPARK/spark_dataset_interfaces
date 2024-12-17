@@ -15,13 +15,16 @@ class FileDataLoader:
     def __init__(self, datapath):
         """Load poses and prep for running."""
         self._path = pathlib.Path(datapath).expanduser().absolute()
-        self._poses = Trajectory.from_csv(self._path / "poses.csv")
-        self._index = 0
+        self._poses = Trajectory.from_csv(
+            self._path / "poses.csv",
+            pose_cols=["tx", "ty", "tz", "qx", "qy", "qz", "qw"],
+        )
+
         with (self._path / "camera_info.yaml").open("r") as fin:
             self._camera_info = yaml.safe_load(fin.read())
 
     @property
-    def sensor(self, min_range=0.1, max_range=5.0):
+    def intrinsics(self):
         """Get camera info."""
         return self._camera_info
 
@@ -29,28 +32,20 @@ class FileDataLoader:
         """Get underlying trajectory length."""
         return len(self._poses)
 
-    def reset(self):
-        """Reset image index to 0."""
-        self._index = 0
-
-    def next(self):
+    def __iter__(self):
         """Get next input packet."""
-        if self._index >= len(self._poses):
-            return None
-
-        timestamp, world_t_body, world_q_body = self._poses[self._index]
-        depth = imageio.v3.imread(self._path / f"depth_{self._index:07d}.tiff")
-        labels = imageio.v3.imread(self._path / f"labels_{self._index:07d}.png")
-        color = imageio.v3.imread(self._path / f"rgb_{self._index:07d}.png")
-        self._index += 1
-        return InputPacket(
-            timestamp=timestamp,
-            world_q_body=world_q_body,
-            world_t_body=world_t_body,
-            color=color,
-            depth=depth,
-            labels=labels,
-        )
+        for idx, stamped_pose in enumerate(self._poses):
+            timestamp, pose = stamped_pose
+            depth = imageio.v3.imread(self._path / f"depth_{idx:07d}.tiff")
+            labels = imageio.v3.imread(self._path / f"labels_{idx:07d}.png")
+            color = imageio.v3.imread(self._path / f"rgb_{idx:07d}.png")
+            yield InputPacket(
+                timestamp=timestamp,
+                pose=pose,
+                color=color,
+                depth=depth,
+                labels=labels,
+            )
 
 
 DataLoader.register(FileDataLoader)
