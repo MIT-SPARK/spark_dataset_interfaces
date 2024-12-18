@@ -48,37 +48,17 @@ class DataLoader(abc.ABC):
         pass
 
     @staticmethod
-    def run(
-        pipeline,
-        data,
-        show_progress=True,
-        max_steps=None,
-        data_callbacks=None,
-        step_callbacks=None,
-    ):
+    def run(data, callback, show_progress=True, max_steps=None, data_callbacks=None):
         """Iterate through the dataloader."""
         data_callbacks = [] if data_callbacks is None else data_callbacks
-        step_callbacks = [] if step_callbacks is None else step_callbacks
 
         data_iter = iter(data)
         data_iter = tqdm.tqdm(data_iter) if show_progress else data_iter
         for idx, packet in enumerate(data_iter):
-            print(idx, packet)
             if max_steps and idx >= max_steps:
                 return
 
             for func in data_callbacks:
                 func(packet)
 
-            pipeline.step(
-                packet.timestamp,
-                packet.world_t_body,
-                packet.world_q_body,
-                packet.depth,
-                packet.labels,
-                packet.color,
-                **packet.extras,
-            )
-
-            for func in step_callbacks:
-                func(pipeline.graph)
+            callback(packet)
