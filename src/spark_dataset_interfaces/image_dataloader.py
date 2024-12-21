@@ -4,6 +4,7 @@ import abc
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
+import click
 import numpy as np
 import tqdm
 
@@ -48,7 +49,14 @@ class DataLoader(abc.ABC):
         pass
 
     @staticmethod
-    def run(data, callback, show_progress=True, max_steps=None, data_callbacks=None):
+    def run(
+        data,
+        callback,
+        show_progress=True,
+        max_steps=None,
+        data_callbacks=None,
+        step_mode=False,
+    ):
         """Iterate through the dataloader."""
         data_callbacks = [] if data_callbacks is None else data_callbacks
 
@@ -60,5 +68,9 @@ class DataLoader(abc.ABC):
 
             for func in data_callbacks:
                 func(packet)
+
+            # wait for main thread to continue running
+            if step_mode:
+                click.pause()
 
             callback(packet)
