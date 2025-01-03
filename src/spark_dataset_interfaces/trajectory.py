@@ -1,6 +1,7 @@
 """Class that generates a set of poses for the simulator."""
 
 import bisect
+import functools
 import pathlib
 from dataclasses import dataclass, field
 from os import PathLike
@@ -80,7 +81,15 @@ class Pose:
     def inverse(self) -> "Pose":
         """Get the inverse of the current pose."""
         R_inv = self.rotation.inv()
-        return Pose(R_inv, R_inv.apply(-self.translation))
+        return Pose(R_inv, R_inv.apply(np.squeeze(-self.translation)))
+
+    def distance(self, other: "Pose") -> float:
+        """Get the translation distance between the poses."""
+        return np.linalg.norm(self.translation - other.translation)
+
+    def angle(self, other: "Pose") -> float:
+        """Get the angular distance between the poses."""
+        return self.between(other).rotation.magnitude()
 
     def __matmul__(self, other):
         """Compose this pose with another."""
@@ -149,14 +158,26 @@ class Trajectory:
         ratio = (time_ns - prev_time) / (curr_time - prev_time)
         return Pose.interp(prev_pose, curr_pose, ratio)
 
+    def __add__(self, other):
+        """Combine trajectories."""
+        offset = 0
+        if self._times.shape[0] > 0:
+            offset = self._times[-1]
+
+        # NOTE(nathan) assumes first of last and last of first are the same
+        new_times = np.hstack((self._times[:-1], other._times + offset))
+        new_poses = self._poses[:-1] + other._poses
+        return Trajectory(new_times, new_poses)
+
     def __iadd__(self, other):
         """Extend a trajectory."""
         offset = 0
         if self._times.shape[0] > 0:
             offset = self._times[-1]
 
-        self._times = np.hstack((self._times, other._times[1:] + offset))
-        self._poses = self._poses + other._poses
+        # NOTE(nathan) assumes first of last and last of first are the same
+        self._times = np.hstack((self._times[:-1], other._times + offset))
+        self._poses = self._poses[:-1] + other._poses
         return self
 
     def __len__(self):
@@ -241,9 +262,25 @@ class Trajectory:
             poses.append(pose_half.interp(pose_end, ratio))
 
         poses.append(pose_end)
-        poses = np.array(poses)
-
         times_s = dt * np.arange(poses.shape[0]) + start_time_s
+        times_ns = (1.0e9 * times_s).astype(np.uint64)
+        return cls(times_ns, poses)
+
+    @classmethod
+    def interp(cls, pose_start, pose_end, num_intermediate, start_time_s=0.0, dt=0.2):
+        """Linearly interpolate poses."""
+        poses = []
+        poses.append(pose_start)
+
+        for i in range(num_intermediate):
+            # we want slerp ratio to be 0 at start (0)
+            # and 1 at end (num_intermediate)
+            ratio = (i + 1) / (num_intermediate + 1)
+            poses.append(pose_start.interp(pose_end, ratio))
+
+        poses.append(pose_end)
+
+        times_s = dt * np.arange(len(poses)) + start_time_s
         times_ns = (1.0e9 * times_s).astype(np.uint64)
         return cls(times_ns, poses)
 
@@ -253,11 +290,12 @@ class Trajectory:
         positions,
         body_R_camera=None,
         reinterp_distance=0.2,
-        reinterp_angle=0.2,
+        reinterp_angle=0.4,
         start_time_s=0.0,
         dt=0.2,
     ):
         """Construct a trajectory from a list of positions."""
+        # TODO(nathan) handle single position requests
         yaw = np.zeros(positions.shape[0])
         for i in range(positions.shape[0] - 1):
             diff = positions[i + 1] - positions[i]
@@ -268,27 +306,29 @@ class Trajectory:
 
         b_R_c = np.eye(3) if body_R_camera is None else body_R_camera
 
-        poses = []
-        for i in range(positions.shape[0] - 1):
-            pose_start = Pose.from_4dof(positions[i, :], yaw[i], b_R_c)
-            pose_end = Pose.from_4dof(positions[i + 1, :], yaw[i + 1], b_R_c)
+        def _num_intermediate(dist, delta):
+            return int(np.ceil(dist / delta) - 1)
 
-            poses.append(pose_start)
+        # TODO(nathan) handle start time
+        trajectories = []
+        for i in range(1, positions.shape[0]):
+            pose_start = Pose.from_4dof(positions[i - 1, :], yaw[i - 1], b_R_c)
+            pose_mid = Pose.from_4dof(positions[i, :], yaw[i - 1], b_R_c)
+            pose_end = Pose.from_4dof(positions[i, :], yaw[i], b_R_c)
+            num_intermediate_pos = _num_intermediate(
+                pose_start.distance(pose_end), reinterp_distance
+            )
+            trajectories.append(
+                cls.interp(pose_start, pose_mid, num_intermediate_pos, 0.0, dt)
+            )
+            if i >= positions.shape[0] - 1:
+                # no need to rotate for the last segment
+                break
 
-            dist = np.linalg.norm(pose_start.translation - pose_end.translation)
-            angle_dist = abs(yaw[i + 1] - yaw[i])
-            num_intermediate_pos = int(np.ceil(dist / reinterp_distance) - 1)
-            num_intermediate_yaw = int(np.ceil(angle_dist / reinterp_angle) - 1)
-            num_intermediate = max(num_intermediate_pos, num_intermediate_yaw)
-            for i in range(num_intermediate):
-                # we want slerp ratio to be 0 at start (0)
-                # and 1 at end (num_intermediate)
-                ratio = (i + 1) / (num_intermediate + 1)
-                poses.append(pose_start.interp(pose_end, ratio))
+            angle_dist = pose_end.angle(pose_mid)
+            num_intermediate_yaw = _num_intermediate(angle_dist, reinterp_angle)
+            trajectories.append(
+                cls.interp(pose_mid, pose_end, num_intermediate_yaw, 0.0, dt)
+            )
 
-            poses.append(pose_end)
-
-        poses = np.array(poses)
-        times_s = dt * np.arange(poses.shape[0]) + start_time_s
-        times_ns = (1.0e9 * times_s).astype(np.uint64)
-        return cls(times_ns, poses)
+        return functools.reduce(lambda x, y: x + y, trajectories)
