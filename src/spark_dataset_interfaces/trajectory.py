@@ -73,7 +73,7 @@ class Pose:
     def flatten(self) -> np.ndarray:
         """Get the pose as a [x y z qx qy qz qw] array."""
         pose_arr = np.zeros(7)
-        pose_arr[:3] = self.translation
+        pose_arr[:3] = np.squeeze(self.translation)
         pose_arr[3:] = self.rotation.as_quat()
         return pose_arr
 
@@ -174,15 +174,15 @@ class Trajectory:
     def dataframe(self):
         """Get flat dataframe of trajectory."""
         pose_array = np.array([x.flatten() for x in self._poses])
-        time_series = pd.Series(self._times, name="timestamp_ns")
         pose_df = pd.DataFrame(pose_array, columns=DEFAULT_HEADER_ORDER)
-        return pd.concat(time_series, pose_df)
+        pose_df.insert(0, "timestamp_ns", self._times)
+        return pose_df
 
     def to_csv(self, filename):
         """Save the trajectory to the csv."""
         filepath = pathlib.Path(filename).expanduser().absolute()
         with filepath.open("w") as fout:
-            self.dataframe.to_csv(fout, index=False)
+            self.dataframe().to_csv(fout, index=False)
 
     @classmethod
     def from_csv(
@@ -272,7 +272,7 @@ class Trajectory:
 
             poses.append(pose_start)
 
-            dist = np.linalg.norm(pose_start[:3] - pose_end[:3])
+            dist = np.linalg.norm(pose_start.translation - pose_end.translation)
             angle_dist = abs(yaw[i + 1] - yaw[i])
             num_intermediate_pos = int(np.ceil(dist / reinterp_distance) - 1)
             num_intermediate_yaw = int(np.ceil(angle_dist / reinterp_angle) - 1)
@@ -281,7 +281,7 @@ class Trajectory:
                 # we want slerp ratio to be 0 at start (0)
                 # and 1 at end (num_intermediate)
                 ratio = (i + 1) / (num_intermediate + 1)
-                poses.append(pose_start.inter(pose_end, ratio))
+                poses.append(pose_start.interp(pose_end, ratio))
 
             poses.append(pose_end)
 
