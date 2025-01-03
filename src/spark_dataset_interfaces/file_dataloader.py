@@ -36,9 +36,9 @@ class FileDataLoader:
         """Get next input packet."""
         for idx, stamped_pose in enumerate(self._poses):
             timestamp, pose = stamped_pose
-            depth = imageio.v3.imread(self._path / f"depth_{idx:07d}.tiff")
-            labels = imageio.v3.imread(self._path / f"labels_{idx:07d}.png")
-            color = imageio.v3.imread(self._path / f"rgb_{idx:07d}.png")
+            depth = imageio.v3.imread(self._path / "depth" / f"depth_{idx:07d}.tiff")
+            labels = imageio.v3.imread(self._path / "labels" / f"labels_{idx:07d}.png")
+            color = imageio.v3.imread(self._path / "color" / f"rgb_{idx:07d}.png")
             yield InputPacket(
                 timestamp=timestamp,
                 pose=pose,
