@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.transform import Rotation, Slerp  # type: ignore
 
-DEFAULT_HEADER_ORDER = ["px", "py", "pz", "qw", "qx", "qy", "qz"]
+DEFAULT_HEADER_ORDER = ["tx", "ty", "tz", "qx", "qy", "qz", "qw"]
 
 
 def _check_file(filepath: PathLike) -> pathlib.Path:
@@ -171,10 +171,13 @@ class Trajectory:
 
         return total_length
 
-    def dataframe(self):
+    def dataframe(self, colnames=None):
         """Get flat dataframe of trajectory."""
         pose_array = np.array([x.flatten() for x in self._poses])
-        pose_df = pd.DataFrame(pose_array, columns=DEFAULT_HEADER_ORDER)
+        pose_df = pd.DataFrame(
+            pose_array,
+            columns=colnames if colnames is not None else DEFAULT_HEADER_ORDER,
+        )
         pose_df.insert(0, "timestamp_ns", self._times)
         return pose_df
 
@@ -196,7 +199,7 @@ class Trajectory:
             df = pd.read_csv(fin)
 
         if pose_cols is None:
-            pose_cols = ["x", "y", "z", "qx", "qy", "qz", "qw"]
+            pose_cols = DEFAULT_HEADER_ORDER
 
         poses = df[pose_cols].to_numpy()
         pose_list = [Pose.from_flattened(x) for x in poses]
