@@ -26,6 +26,9 @@ where = ["src"]
 [tool.isort]
 profile = "black"
 
+[tool.pytest]
+testpaths = "tests"
+addopts = ["--cov-report=term-missing"]
 
 [tool.tox]
 requires = ["tox>=4"]
@@ -36,13 +39,14 @@ env_list = ["type", "3.8", "3.9", "3.10"]
 description = "run unit tests"
 deps = [
     "pytest>=8",
-    "pytest-sugar"
+    "pytest-sugar",
+    "pytest-cov",
 ]
-commands = [["pytest", { replace = "posargs", default = ["tests"], extend = true }]]
+commands = [["pytest", "--cov={envsitepackagesdir}/spark_dataset_interfaces", "--cov-report=term-missing", { replace = "posargs", default = ["-vv"], extend = true }]]
 
 [tool.tox.env.type]
 description = "run type checks"
 deps = ["mypy"]
 commands = [
-    ["mypy", "--install-types", "--non-interactive", { replace = "posargs", default = ["src", "tests"], extend = true}],
+    ["mypy", "--install-types", "--non-interactive", { replace = "posargs", default = ["src"], extend = true}],
 ]

@@ -83,7 +83,7 @@ class Pose:
         R_inv = self.rotation.inv()
         return Pose(R_inv, R_inv.apply(np.squeeze(-self.translation)))
 
-    def distance(self, other: "Pose") -> float:
+    def distance(self, other: "Pose"):
         """Get the translation distance between the poses."""
         return np.linalg.norm(self.translation - other.translation)
 
@@ -111,7 +111,7 @@ class Trajectory:
 
         Args:
             times (np.ndarray): N x 1 array of np.uint64 timestamps in nanoseconds
-            trajectory_array (np.ndarray): N x 7 with columns x, y, z, qw, qx, qy, qz
+            trajectory_array: N x 7 with columns x, y, z, qw, qx, qy, qz
         """
         self._times = np.squeeze(np.array(times).astype(np.int64))
         self._poses = poses
@@ -120,6 +120,16 @@ class Trajectory:
         N_poses = len(self._poses)
         if N_times != N_poses:
             raise ValueError(f"# of times ({N_times}) != # of poses ({N_poses})")
+
+    @property
+    def times(self):
+        """Get the trajectory timestamps."""
+        return self._times
+
+    @property
+    def poses(self):
+        """Get the flattened trajectory poses."""
+        return np.array([x.flatten() for x in self._poses])
 
     def __iter__(self):
         """Get an iterator over a trajectory."""
@@ -194,9 +204,8 @@ class Trajectory:
 
     def dataframe(self, colnames=None):
         """Get flat dataframe of trajectory."""
-        pose_array = np.array([x.flatten() for x in self._poses])
         pose_df = pd.DataFrame(
-            pose_array,
+            self.poses,
             columns=colnames if colnames is not None else DEFAULT_HEADER_ORDER,
         )
         pose_df.insert(0, "timestamp_ns", self._times)
@@ -207,6 +216,14 @@ class Trajectory:
         filepath = pathlib.Path(filename).expanduser().absolute()
         with filepath.open("w") as fout:
             self.dataframe().to_csv(fout, index=False)
+
+    @classmethod
+    def from_flattened(cls, times: np.ndarray, poses: np.ndarray):
+        """Load trajectory from flattened pose array (xyzw order)."""
+        if poses.shape[1] != 7:
+            raise ValueError(f"Invalid pose array: {poses.shape}!")
+
+        return cls(times, [Pose.from_flattened(x) for x in poses])
 
     @classmethod
     def from_csv(

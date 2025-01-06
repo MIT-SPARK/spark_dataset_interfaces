@@ -5,8 +5,8 @@ import pathlib
 from collections import deque
 from typing import Optional
 
-import cv2
-import networkx as nx
+import cv2  # type: ignore
+import networkx as nx  # type: ignore
 import numpy as np
 from rosbags.rosbag1 import Reader
 from rosbags.typesys import Stores, get_types_from_msg, get_typestore
