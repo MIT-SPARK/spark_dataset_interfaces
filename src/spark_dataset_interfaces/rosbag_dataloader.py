@@ -4,8 +4,8 @@ import logging
 import pathlib
 from collections import deque
 from typing import Optional
+import imageio.v3
 
-import cv2  # type: ignore
 import networkx as nx  # type: ignore
 import numpy as np
 from rosbags.rosbag1 import Reader
@@ -64,6 +64,34 @@ def _pairwise_iter(iterable):
     for b in iterator:
         yield a, b
         a = b
+
+
+def _trajectory_from_bag(bag, typestore, map_frame, body_frame, body_T_sensor=None):
+    timestamps = []
+    map_T_sensor = []
+    for _, msg, _ in _message_iter(bag, typestore, ["/tf"]):
+        for x in msg.transforms:
+            if map_frame != x.header.frame_id or body_frame != x.child_frame_id:
+                continue
+
+            map_T_body = Pose.from_flattened(
+                [
+                    x.transform.translation.x,
+                    x.transform.translation.y,
+                    x.transform.translation.z,
+                    x.transform.rotation.x,
+                    x.transform.rotation.y,
+                    x.transform.rotation.z,
+                    x.transform.rotation.w,
+                ]
+            )
+
+            map_T_sensor.append(
+                map_T_body if body_T_sensor is None else map_T_body @ body_T_sensor
+            )
+            timestamps.append(_parse_stamp(x))
+
+    return Trajectory(timestamps, map_T_sensor)
 
 
 def _get_extrinsics(bag, typestore, body_frame, sensor_frame):
@@ -129,7 +157,7 @@ def _parse_image(msg, topic):
     topic_parts = topic.split("/")
     if topic_parts[-1] == "compressed":
         img_data = np.frombuffer(msg.data, dtype=np.uint8)
-        return cv2.imdecode(img_data, cv2.IMREAD_UNCHANGED)
+        return imageio.v3.imread(img_data)
 
     info = ENCODINGS.get(msg.encoding)
     if info is None:
@@ -236,11 +264,12 @@ class RosbagDataLoader:
         self,
         datapath: pathlib.Path,
         rgb_topic: str,
-        gt_filepath: Optional[pathlib.Path] = None,
         rgb_info_topic: Optional[str] = None,
         depth_topic: Optional[str] = None,
         label_topic: Optional[str] = None,
+        trajectory: Optional[Trajectory] = None,
         body_frame: Optional[str] = None,
+        map_frame: Optional[str] = None,
         min_separation_s: float = 0.0,
         threshold_us: int = 16000,
         is_bgr: bool = True,
@@ -256,10 +285,12 @@ class RosbagDataLoader:
         Args:
             datapath: Path to rosbag
             rgb_topic: Topic for RGB images
-            gt_filepath: Optional trajectory file (inferred from bag path otherwise)
             rgb_info_topic: Optional info topic (inferred from rgb topic otherwise)
             depth_topic: Optional depth topic (not loaded otherwise)
+            label_topic: Optional label topic (not loaded otherwise)
+            trajectory: Optional trajectory (can also optionally be loaded from bag)
             body_frame: Optional body frame to apply pose transform
+            map_frame: Optional map frame to use to load trajectory
             min_separation_s: Amount to separate data by
             threshold_us: Comparison threshold when synchronizing images
             is_bgr: Color images are bgr order
@@ -274,18 +305,14 @@ class RosbagDataLoader:
         else:
             self._rgb_info_topic = rgb_info_topic
 
-        if gt_filepath is not None:
-            self._trajectory = Trajectory.from_csv(gt_filepath)
-        else:
-            self._trajectory = None
-
         self._depth_topic = depth_topic
         self._label_topic = label_topic
+        self._trajectory = trajectory
         self._body_frame = body_frame
-        self._is_bgr = is_bgr
-
-        self._threshold_us = threshold_us
+        self._map_frame = map_frame
         self._min_separation_s = min_separation_s
+        self._threshold_us = threshold_us
+        self._is_bgr = is_bgr
 
     def open(self):
         """Open the rosbag."""
@@ -305,10 +332,19 @@ class RosbagDataLoader:
 
         self._camera_info = _parse_camera_info(msg)
 
+        sensor_frame = msg.header.frame_id
         self._body_T_sensor = Pose()
         if self._body_frame is not None:
             self._body_T_sensor = _get_extrinsics(
-                self._bag, self._typestore, self._body_frame, msg.header.frame_id
+                self._bag, self._typestore, self._body_frame, sensor_frame
+            )
+
+        if self._trajectory is None and self._map_frame is not None:
+            self._trajectory = _trajectory_from_bag(
+                self._bag,
+                self._typestore,
+                self._map_frame,
+                sensor_frame if self._body_frame is None else self._body_frame,
             )
 
     def close(self):
@@ -371,8 +407,7 @@ class RosbagDataLoader:
 
             pose = None
             if self._trajectory is not None:
-                # TODO(nathan) pass extrinsics
-                pose = self._trajectory.pose(time, self._body_T_sensor)
+                pose = self._trajectory.pose(time) @ self._body_T_sensor
 
             if last_time_ns is not None:
                 diff_s = (time - last_time_ns) * 1.0e-9

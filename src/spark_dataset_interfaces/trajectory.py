@@ -244,46 +244,6 @@ class Trajectory:
         return cls(np.array(df[time_col].to_numpy(), dtype=np.int64), pose_list)
 
     @classmethod
-    def rotate(
-        cls,
-        pos,
-        body_R_camera=None,
-        reinterp_distance=0.2,
-        reinterp_angle=0.2,
-        start_time_s=0.0,
-        dt=0.2,
-    ):
-        """Construct a trajectory from a list of positions."""
-        b_R_c = np.eye(3) if body_R_camera is None else body_R_camera
-
-        pose_start = Pose.from_4dof(pos, 0, b_R_c)
-        pose_half = Pose.from_4dof(pos, np.pi, b_R_c)
-        pose_end = Pose.from_4dof(pos, 2 * np.pi, b_R_c)
-        num_intermediate = int(np.ceil(np.pi / reinterp_angle) - 1)
-
-        poses = []
-        poses.append(pose_start)
-
-        for i in range(num_intermediate):
-            # we want slerp ratio to be 0 at start (0)
-            # and 1 at end (num_intermediate)
-            ratio = (i + 1) / (num_intermediate + 1)
-            poses.append(pose_start.interp(pose_half, ratio))
-
-        poses.append(pose_half)
-
-        for i in range(num_intermediate):
-            # we want slerp ratio to be 0 at start (0)
-            # and 1 at end (num_intermediate)
-            ratio = (i + 1) / (num_intermediate + 1)
-            poses.append(pose_half.interp(pose_end, ratio))
-
-        poses.append(pose_end)
-        times_s = dt * np.arange(poses.shape[0]) + start_time_s
-        times_ns = (1.0e9 * times_s).astype(np.uint64)
-        return cls(times_ns, poses)
-
-    @classmethod
     def interp(cls, pose_start, pose_end, num_intermediate, start_time_s=0.0, dt=0.2):
         """Linearly interpolate poses."""
         poses = []
