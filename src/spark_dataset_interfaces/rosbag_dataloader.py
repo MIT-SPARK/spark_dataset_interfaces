@@ -4,8 +4,8 @@ import logging
 import pathlib
 from collections import deque
 from typing import Optional
-import imageio.v3
 
+import imageio.v3
 import networkx as nx  # type: ignore
 import numpy as np
 from rosbags.rosbag1 import Reader
@@ -164,7 +164,7 @@ def _parse_image(msg):
     img = np.frombuffer(msg.data, dtype=info[0]).reshape(
         (msg.height, msg.width, info[1])
     )
-    return np.squeeze(img)
+    return np.squeeze(img).copy()
 
 
 def _message_iter(bag, typestore, topics):
