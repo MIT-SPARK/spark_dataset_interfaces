@@ -17,7 +17,7 @@ DEFAULT_HEADER_ORDER = ["tx", "ty", "tz", "qx", "qy", "qz", "qw"]
 def _check_file(filepath: PathLike) -> pathlib.Path:
     filepath = pathlib.Path(filepath).resolve()
     if not filepath.exists():
-        raise ValueError("File does not exist: '{filepath}'")
+        raise ValueError(f"File does not exist: '{filepath}'")
 
     return filepath
 
