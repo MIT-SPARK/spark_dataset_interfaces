@@ -11,7 +11,7 @@ import numpy as np
 from rosbags.rosbag1 import Reader
 from rosbags.typesys import Stores, get_types_from_msg, get_typestore
 
-from spark_dataset_interfaces.image_dataloader import InputPacket
+from spark_dataset_interfaces.dataloader import InputPacket
 from spark_dataset_interfaces.trajectory import Pose, Trajectory
 
 ENCODINGS = {

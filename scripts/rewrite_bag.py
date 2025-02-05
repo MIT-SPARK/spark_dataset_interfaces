@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Script that rewrites a rosbag by copying all messages manually."""
 
 import os

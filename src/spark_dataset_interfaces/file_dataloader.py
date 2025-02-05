@@ -5,7 +5,7 @@ import pathlib
 import imageio.v3
 import yaml
 
-from spark_dataset_interfaces.image_dataloader import DataLoader, InputPacket
+from spark_dataset_interfaces.dataloader import DataLoader, InputPacket
 from spark_dataset_interfaces.trajectory import Trajectory
 
 
