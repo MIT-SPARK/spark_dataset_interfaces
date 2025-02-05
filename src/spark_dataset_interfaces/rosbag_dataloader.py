@@ -150,14 +150,12 @@ def _parse_camera_info(msg):
     }
 
 
-def _parse_image(msg, topic):
+def _parse_image(msg):
     if msg is None:
         return None
 
-    topic_parts = topic.split("/")
-    if topic_parts[-1] == "compressed":
-        img_data = np.frombuffer(msg.data, dtype=np.uint8)
-        return imageio.v3.imread(img_data)
+    if "CompressedImage" in msg.__msgtype__:
+        return imageio.v3.imread(msg.data.tobytes())
 
     info = ENCODINGS.get(msg.encoding)
     if info is None:
@@ -226,9 +224,9 @@ def _triplet_iter(bag_iter, topic1, topic2, topic3, max_diff_ns):
         if len(q1) == 0 or len(q2) == 0 or len(q3) == 0:
             continue
 
-        time1_ns = q1[0].header.stamp.to_nsec()
-        time2_ns = q2[0].header.stamp.to_nsec()
-        time3_ns = q3[0].header.stamp.to_nsec()
+        time1_ns = _parse_stamp(q1[0])
+        time2_ns = _parse_stamp(q2[0])
+        time3_ns = _parse_stamp(q3[0])
 
         diff12 = abs(time1_ns - time2_ns)
         diff13 = abs(time1_ns - time3_ns)
@@ -415,9 +413,9 @@ class RosbagDataLoader:
                     continue
 
             # NOTE(nathan) parsing handles optional images by returning None
-            rgb = _parse_image(rgb_msg, self._rgb_topic)
-            depth = _parse_image(depth_msg, self._depth_topic)
-            labels = _parse_image(label_msg, self._label_topic)
+            rgb = _parse_image(rgb_msg)
+            depth = _parse_image(depth_msg)
+            labels = _parse_image(label_msg)
 
             last_time_ns = time
             yield InputPacket(
