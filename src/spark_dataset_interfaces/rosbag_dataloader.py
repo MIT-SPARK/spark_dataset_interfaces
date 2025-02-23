@@ -181,15 +181,21 @@ def _message_iter(bag, typestore, topics):
         yield connection.topic, msg, timestamp
 
 
-def _single_iter(bag_iter):
-    for _, msg, _ in bag_iter:
+def _single_iter(bag_iter, start_time_ns):
+    for _, msg, stamp_ns in bag_iter:
+        if stamp_ns is not None and stamp_ns < start_time_ns:
+            continue
+
         yield msg, None, None
 
 
-def _paired_iter(bag_iter, topic1, topic2, max_diff_ns):
+def _paired_iter(bag_iter, topic1, topic2, max_diff_ns, start_time_ns):
     q1 = deque()
     q2 = deque()
-    for msg_topic, msg, _ in bag_iter:
+    for msg_topic, msg, stamp_ns in bag_iter:
+        if stamp_ns is not None and stamp_ns < start_time_ns:
+            continue
+
         q1.append(msg) if msg_topic == topic1 else q2.append(msg)
         if len(q1) == 0 or len(q2) == 0:
             continue
@@ -209,11 +215,14 @@ def _paired_iter(bag_iter, topic1, topic2, max_diff_ns):
         yield msg1, msg2, None
 
 
-def _triplet_iter(bag_iter, topic1, topic2, topic3, max_diff_ns):
+def _triplet_iter(bag_iter, topic1, topic2, topic3, max_diff_ns, start_time_ns):
     q1 = deque()
     q2 = deque()
     q3 = deque()
-    for msg_topic, msg, _ in bag_iter:
+    for msg_topic, msg, stamp_ns in bag_iter:
+        if stamp_ns is not None and stamp_ns < start_time_ns:
+            continue
+
         if msg_topic == topic1:
             q1.append(msg)
         elif msg_topic == topic2:
@@ -271,6 +280,7 @@ class RosbagDataLoader:
         min_separation_s: float = 0.0,
         threshold_us: int = 16000,
         is_bgr: bool = True,
+        start_time_ns: Optional[int] = None,
         **kwargs,
     ):
         """
@@ -292,6 +302,7 @@ class RosbagDataLoader:
             min_separation_s: Amount to separate data by
             threshold_us: Comparison threshold when synchronizing images
             is_bgr: Color images are bgr order
+            start_time_ns: Time to start the bag at
         """
         if rgb_topic is None:
             raise ValueError("rgb_topic required!")
@@ -311,6 +322,7 @@ class RosbagDataLoader:
         self._min_separation_s = min_separation_s
         self._threshold_us = threshold_us
         self._is_bgr = is_bgr
+        self._start_time_ns = start_time_ns
 
     def open(self):
         """Open the rosbag."""
@@ -378,6 +390,10 @@ class RosbagDataLoader:
     def __iter__(self):
         """Return the iterator object."""
         bag_iter = _message_iter(self._bag, self._typestore, self.topics)
+        abs_start_time = None
+        if self._start_time_ns is not None:
+            abs_start_time = self._bag.start_time + self._start_time_ns
+
         if self._depth_topic is not None and self._label_topic is not None:
             logging.info("AVAILABLE: RGB, DEPTH, LABELS")
             msg_iter = _triplet_iter(
@@ -386,6 +402,7 @@ class RosbagDataLoader:
                 self._depth_topic,
                 self._label_topic,
                 int(1.0e3 * self._threshold_us),
+                abs_start_time,
             )
         elif self._depth_topic is not None:
             logging.info("AVAILABLE: RGB, DEPTH")
@@ -394,10 +411,11 @@ class RosbagDataLoader:
                 self._rgb_topic,
                 self._depth_topic,
                 int(1.0e3 * self._threshold_us),
+                abs_start_time
             )
         else:
             logging.info("AVAILABLE: RGB")
-            msg_iter = _single_iter(bag_iter)
+            msg_iter = _single_iter(bag_iter, abs_start_time)
 
         last_time_ns = None
         for rgb_msg, depth_msg, label_msg in msg_iter:
