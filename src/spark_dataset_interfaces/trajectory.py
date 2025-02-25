@@ -99,6 +99,13 @@ class Pose:
         """Compose this pose with another."""
         return self.compose(other)
 
+    def __str__(self):
+        q = self.rotation.as_quat()
+        order = [("w", 3), ("x", 0), ("y", 1), ("z", 2)]
+        q_str = ", ".join([f"{n}={q[i]:.4f}" for n, i in order])
+        t_str = ", ".join([f"{n}={self.translation[i]:.4f}" for n, i in order[1:]])
+        return f"(q: [{q_str}], t: [{t_str}])"
+
 
 class Trajectory:
     """Represents pre-computed trajectory."""

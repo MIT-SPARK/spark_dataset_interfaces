@@ -348,6 +348,7 @@ class RosbagDataLoader:
             self._body_T_sensor = _get_extrinsics(
                 self._bag, self._typestore, self._body_frame, sensor_frame
             )
+            logging.info("Loaded body_T_sensor: {self._body_T_sensor}")
 
         if self._trajectory is None and self._map_frame is not None:
             self._trajectory = _trajectory_from_bag(
@@ -423,8 +424,12 @@ class RosbagDataLoader:
 
             pose = None
             if self._trajectory is not None:
-                pose = self._trajectory.pose(time) @ self._body_T_sensor
+                pose = self._trajectory.pose(time)
 
+            if pose is None:
+                continue
+
+            pose = pose @ self._body_T_sensor
             if last_time_ns is not None:
                 diff_s = (time - last_time_ns) * 1.0e-9
                 if diff_s < self._min_separation_s:
