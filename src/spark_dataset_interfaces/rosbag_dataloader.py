@@ -63,22 +63,16 @@ class Bag1Interface:
     def open(self):
         self._bag = Reader(str(self._path))
         self._bag.open()
-
-        msg_types = {}
-        for connection in self._bag.connections:
-            msg_types.update(get_types_from_msg(connection.msgdef, connection.msgtype))
-
-        self._typestore = get_typestore(Stores.EMPTY)
-        self._typestore.register(msg_types)
+        self._typestore = get_typestore(Stores.ROS1_NOETIC)
 
     def close(self):
         self._bag.close()
 
     def read_messages(self, topics=None):
         if topics is not None:
-            connections = [x for x in self.bag.connections if x.topic in topics]
+            connections = [x for x in self._bag.connections if x.topic in topics]
         else:
-            connections = self.bag.connections
+            connections = self._bag.connections
 
         N_unique = len(set([x.topic for x in connections]))
         if N_unique != len(topics):
@@ -249,7 +243,7 @@ def _parse_image(msg):
     if msg is None:
         return None
 
-    if "CompressedImage" in msg.__msgtype__:
+    if "CompressedImage" in type(msg).__name__:
         return imageio.v3.imread(msg.data.tobytes())
 
     info = ENCODINGS.get(msg.encoding)
@@ -264,7 +258,7 @@ def _parse_image(msg):
 
 def _single_iter(bag_iter, start_time_ns):
     for _, msg, stamp_ns in bag_iter:
-        if stamp_ns is not None and stamp_ns < start_time_ns:
+        if start_time_ns is not None and stamp_ns < start_time_ns:
             continue
 
         yield msg, None, None
@@ -274,7 +268,7 @@ def _paired_iter(bag_iter, topic1, topic2, max_diff_ns, start_time_ns):
     q1 = deque()
     q2 = deque()
     for msg_topic, msg, stamp_ns in bag_iter:
-        if stamp_ns is not None and stamp_ns < start_time_ns:
+        if start_time_ns is not None and stamp_ns < start_time_ns:
             continue
 
         q1.append(msg) if msg_topic == topic1 else q2.append(msg)
@@ -301,7 +295,7 @@ def _triplet_iter(bag_iter, topic1, topic2, topic3, max_diff_ns, start_time_ns):
     q2 = deque()
     q3 = deque()
     for msg_topic, msg, stamp_ns in bag_iter:
-        if stamp_ns is not None and stamp_ns < start_time_ns:
+        if start_time_ns is not None and stamp_ns < start_time_ns:
             continue
 
         if msg_topic == topic1:
@@ -494,11 +488,11 @@ class RosbagDataLoader:
             pose = None
             if self._trajectory is not None:
                 pose = self._trajectory.pose(time)
+                if pose is None:
+                    continue
 
-            if pose is None:
-                continue
+                pose = pose @ self._body_T_sensor
 
-            pose = pose @ self._body_T_sensor
             if last_time_ns is not None:
                 diff_s = (time - last_time_ns) * 1.0e-9
                 if diff_s < self._min_separation_s:
