@@ -234,13 +234,14 @@ def _parse_stamp(msg):
 
 
 def _parse_camera_info(msg):
+    K = msg.K if hasattr(msg, "K") else msg.k
     return {
         "width": msg.width,
         "height": msg.height,
-        "fx": msg.K[0],
-        "fy": msg.K[4],
-        "cx": msg.K[2],
-        "cy": msg.K[5],
+        "fx": K[0],
+        "fy": K[4],
+        "cx": K[2],
+        "cy": K[5],
     }
 
 
