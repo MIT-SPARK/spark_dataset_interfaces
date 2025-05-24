@@ -8,9 +8,6 @@ from typing import Optional
 import imageio.v3
 import networkx as nx  # type: ignore
 import numpy as np
-from rosbags.rosbag1 import Reader
-from rosbags.typesys import Stores, get_types_from_msg, get_typestore
-
 from spark_dataset_interfaces.dataloader import InputPacket
 from spark_dataset_interfaces.trajectory import Pose, Trajectory
 
@@ -61,6 +58,9 @@ class Bag1Interface:
         self._path = pathlib.Path(bag_path).expanduser().resolve()
 
     def open(self):
+        from rosbags.rosbag1 import Reader
+        from rosbags.typesys import Stores, get_typestore
+
         self._bag = Reader(str(self._path))
         self._bag.open()
         self._typestore = get_typestore(Stores.ROS1_NOETIC)
