@@ -56,6 +56,87 @@ ENCODINGS = {
 }
 
 
+class Bag1Interface:
+    def __init__(self, bag_path):
+        self._path = pathlib.Path(bag_path).expanduser().resolve()
+
+    def open(self):
+        self._bag = Reader(str(self._path))
+        self._bag.open()
+
+        msg_types = {}
+        for connection in self._bag.connections:
+            msg_types.update(get_types_from_msg(connection.msgdef, connection.msgtype))
+
+        self._typestore = get_typestore(Stores.EMPTY)
+        self._typestore.register(msg_types)
+
+    def close(self):
+        self._bag.close()
+
+    def read_messages(self, topics=None):
+        if topics is not None:
+            connections = [x for x in self.bag.connections if x.topic in topics]
+        else:
+            connections = self.bag.connections
+
+        N_unique = len(set([x.topic for x in connections]))
+        if N_unique != len(topics):
+            all_topics = set([x.topic for x in self._bag.connections])
+            missing = set(topics).difference(all_topics)
+            logging.warning(
+                f"Could not find {missing} in bag (available: {all_topics})"
+            )
+            return None
+
+        for connection, timestamp, rawdata in self._bag.messages(
+            connections=connections
+        ):
+            msg = self._typestore.deserialize_ros1(rawdata, connection.msgtype)
+            yield connection.topic, msg, timestamp
+
+
+class Bag2Interface:
+    def __init__(self, bag_path):
+        import rosbag2_py
+        self._path = bag_path
+        self._bag = rosbag2_py.SequentialReader()
+
+    def open(self):
+        from rosidl_runtime_py.utilities import get_message
+        self._bag.open_uri(str(self._path))
+        topics = self._bag.get_all_topics_and_types()
+        self._typenames = {x.name: get_message(x.type) for x in topics}
+
+    def close(self):
+        self._bag.close()
+
+    def read_messages(self, topics=None):
+        import rosbag2_py
+        from rclpy.serialization import deserialize_message
+
+        self._bag.seek(0)
+
+        if topics is not None:
+            missing = []
+            for topic in topics:
+                if topic not in self._typenames:
+                    missing.append(topic)
+
+            if len(missing) > 0:
+                logging.warning(
+                    f"Could not find {missing} in bag (available: {[x for x in self._typenames]})"
+                )
+                return None
+
+            self._bag.set_filter(rosbag2_py.StorageFilter(topics=topics))
+
+        while self._bag.has_next():
+            topic, data, t = self._bag.read_next()
+            yield topic, deserialize_message(data, self._typenames[topic]), t
+
+
+
 def _pairwise_iter(iterable):
     # from https://docs.python.org/3/library/itertools.html#itertools.pairwise
     # TODO(nathan) replace when on 3.10
@@ -66,10 +147,10 @@ def _pairwise_iter(iterable):
         a = b
 
 
-def _trajectory_from_bag(bag, typestore, map_frame, body_frame, body_T_sensor=None):
+def _trajectory_from_bag(bag, map_frame, body_frame, body_T_sensor=None):
     timestamps = []
     map_T_sensor = []
-    for _, msg, _ in _message_iter(bag, typestore, ["/tf"]):
+    for _, msg, _ in bag.read_messages(["/tf"]):
         for x in msg.transforms:
             if map_frame != x.header.frame_id or body_frame != x.child_frame_id:
                 continue
@@ -94,9 +175,9 @@ def _trajectory_from_bag(bag, typestore, map_frame, body_frame, body_T_sensor=No
     return Trajectory(timestamps, map_T_sensor)
 
 
-def _get_extrinsics(bag, typestore, body_frame, sensor_frame):
+def _get_extrinsics(bag, body_frame, sensor_frame):
     G = nx.DiGraph()
-    for _, msg, _ in _message_iter(bag, typestore, ["/tf_static"]):
+    for _, msg, _ in bag.read_messages(["/tf_static"]):
         for x in msg.transforms:
             parent = x.header.frame_id
             child = x.child_frame_id
@@ -129,6 +210,14 @@ def _get_extrinsics(bag, typestore, body_frame, sensor_frame):
         body_T_sensor @= G.edges[source, target]["transform"]
 
     return body_T_sensor
+
+
+def _find_camera_info(bag, topic):
+    logging.info(f"Looking for camera info @ '{topic}'")
+    for _, msg, _ in bag.read_messages([topic]):
+        return msg
+
+    return None
 
 
 def _normalize_path(filepath):
@@ -165,20 +254,6 @@ def _parse_image(msg):
         (msg.height, msg.width, info[1])
     )
     return np.squeeze(img).copy()
-
-
-def _message_iter(bag, typestore, topics):
-    connections = [x for x in bag.connections if x.topic in topics]
-    N_unique = len(set([x.topic for x in connections]))
-    if N_unique != len(topics):
-        all_topics = set([x.topic for x in bag.connections])
-        missing = set(topics).difference(all_topics)
-        logging.warning(f"Could not find {missing} in bag (available: {all_topics})")
-        return None
-
-    for connection, timestamp, rawdata in bag.messages(connections=connections):
-        msg = typestore.deserialize_ros1(rawdata, connection.msgtype)
-        yield connection.topic, msg, timestamp
 
 
 def _single_iter(bag_iter, start_time_ns):
@@ -256,14 +331,6 @@ def _triplet_iter(bag_iter, topic1, topic2, topic3, max_diff_ns, start_time_ns):
         yield msg1, msg2, msg3
 
 
-def _find_camera_info(bag, typestore, topic):
-    logging.info(f"Looking for camera info @ '{topic}'")
-    for _, msg, _ in _message_iter(bag, typestore, [topic]):
-        return msg
-
-    return None
-
-
 class RosbagDataLoader:
     """Class for loading rosbags."""
 
@@ -326,17 +393,14 @@ class RosbagDataLoader:
 
     def open(self):
         """Open the rosbag."""
-        self._bag = Reader(str(self._path))
+        if self._path.suffix == ".bag":
+            self._bag = Bag1Interface(self._path)
+        else:
+            self._bag = Bag2Interface(self._path)
+
         self._bag.open()
 
-        msg_types = {}
-        for connection in self._bag.connections:
-            msg_types.update(get_types_from_msg(connection.msgdef, connection.msgtype))
-
-        self._typestore = get_typestore(Stores.EMPTY)
-        self._typestore.register(msg_types)
-
-        msg = _find_camera_info(self._bag, self._typestore, self._rgb_info_topic)
+        msg = _find_camera_info(self._bag, self._rgb_info_topic)
         if msg is None:
             raise ValueError(f"Could not find camera info for '{self._rgb_topic}'")
 
@@ -346,14 +410,13 @@ class RosbagDataLoader:
         self._body_T_sensor = Pose()
         if self._body_frame is not None:
             self._body_T_sensor = _get_extrinsics(
-                self._bag, self._typestore, self._body_frame, sensor_frame
+                self._bag, self._body_frame, sensor_frame
             )
             logging.info("Loaded body_T_sensor: {self._body_T_sensor}")
 
         if self._trajectory is None and self._map_frame is not None:
             self._trajectory = _trajectory_from_bag(
                 self._bag,
-                self._typestore,
                 self._map_frame,
                 sensor_frame if self._body_frame is None else self._body_frame,
             )
@@ -390,11 +453,11 @@ class RosbagDataLoader:
 
     def __iter__(self):
         """Return the iterator object."""
-        bag_iter = _message_iter(self._bag, self._typestore, self.topics)
         abs_start_time = None
         if self._start_time_ns is not None:
             abs_start_time = self._bag.start_time + self._start_time_ns
 
+        bag_iter = self._bag.read_messages(self.topics)
         if self._depth_topic is not None and self._label_topic is not None:
             logging.info("AVAILABLE: RGB, DEPTH, LABELS")
             msg_iter = _triplet_iter(
@@ -412,7 +475,7 @@ class RosbagDataLoader:
                 self._rgb_topic,
                 self._depth_topic,
                 int(1.0e3 * self._threshold_us),
-                abs_start_time
+                abs_start_time,
             )
         else:
             logging.info("AVAILABLE: RGB")
