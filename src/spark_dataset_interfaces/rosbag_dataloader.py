@@ -459,13 +459,13 @@ class RosbagDataLoader:
 
     def __iter__(self):
         """Return the iterator object."""
-        abs_start_time = None
+        abs_start_time = 0
         if self._start_time_ns is not None:
             abs_start_time = self._bag.start_time + self._start_time_ns
 
         bag_iter = self._bag.read_messages(self.topics)
         if self._depth_topic is not None and self._label_topic is not None:
-            logging.info("AVAILABLE: RGB, DEPTH, LABELS")
+            logging.debug("Available information: [color, depth, labels]")
             msg_iter = _triplet_iter(
                 bag_iter,
                 self._rgb_topic,
@@ -475,7 +475,7 @@ class RosbagDataLoader:
                 abs_start_time,
             )
         elif self._depth_topic is not None:
-            logging.info("AVAILABLE: RGB, DEPTH")
+            logging.debug("Available information: [color, depth]")
             msg_iter = _paired_iter(
                 bag_iter,
                 self._rgb_topic,
@@ -484,7 +484,7 @@ class RosbagDataLoader:
                 abs_start_time,
             )
         else:
-            logging.info("AVAILABLE: RGB")
+            logging.debug("Available information: [color]")
             msg_iter = _single_iter(bag_iter, abs_start_time)
 
         last_time_ns = None
