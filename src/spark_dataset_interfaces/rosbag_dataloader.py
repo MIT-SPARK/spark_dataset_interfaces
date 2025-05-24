@@ -99,11 +99,17 @@ class Bag1Interface:
 class Bag2Interface:
     def __init__(self, bag_path):
         import rosbag2_py
+
         self._path = bag_path
         self._bag = rosbag2_py.SequentialReader()
 
     def open(self):
+        from rclpy.logging import get_logger, get_logging_severity_from_string
         from rosidl_runtime_py.utilities import get_message
+
+        get_logger("rosbag2_storage").set_level(
+            get_logging_severity_from_string("WARN")
+        )
         self._bag.open_uri(str(self._path))
         topics = self._bag.get_all_topics_and_types()
         self._typenames = {x.name: get_message(x.type) for x in topics}
@@ -134,7 +140,6 @@ class Bag2Interface:
         while self._bag.has_next():
             topic, data, t = self._bag.read_next()
             yield topic, deserialize_message(data, self._typenames[topic]), t
-
 
 
 def _pairwise_iter(iterable):
