@@ -8,6 +8,7 @@ from typing import Optional
 import imageio.v3
 import networkx as nx  # type: ignore
 import numpy as np
+import tqdm
 from sortedcontainers import SortedKeyList
 from spark_dataset_interfaces.dataloader import InputPacket
 from spark_dataset_interfaces.trajectory import Pose, Trajectory
@@ -54,6 +55,36 @@ ENCODINGS = {
 }
 
 
+class ProgressTracker:
+    def __init__(self, bag, start_time_ns=None, enabled=True):
+        rel_start = start_time_ns if start_time_ns else bag.start_time
+        rel_duration = bag.duration - (rel_start - bag.start_time)
+
+        self.total_s = rel_duration * 1.0e-9
+        self.enabled = enabled
+        self.pbar = None
+        self.last_stamp = None
+
+    def __enter__(self):
+        self.pbar = None
+        self.last_stamp = None
+        if self.enabled:
+            fmt = "{l_bar}{bar}| {n:.2f}/{total:.2f} [s] [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
+            self.pbar = tqdm.tqdm(total=self.total_s, unit=" bag seconds", bar_format=fmt)
+
+        return self
+
+    def update(self, stamp):
+        if self.pbar is not None and self.last_stamp is not None:
+            self.pbar.update((stamp - self.last_stamp) * 1.0e-9)
+
+        self.last_stamp = stamp
+
+    def __exit__(self, exc_type, exc_msg, traceback):
+        if self.pbar is not None:
+            self.pbar.close()
+
+
 class Bag1Interface:
     def __init__(self, bag_path):
         self._path = pathlib.Path(bag_path).expanduser().resolve()
@@ -69,7 +100,15 @@ class Bag1Interface:
     def close(self):
         self._bag.close()
 
-    def read_messages(self, topics=None, start_time_ns=None):
+    @property
+    def start_time(self):
+        return self._bag.start_time
+
+    @property
+    def duration(self):
+        return self._bag.end_time - self._bag.start_time
+
+    def read_messages(self, topics=None, start_time_ns=None, progress=True):
         if topics is not None:
             connections = [x for x in self._bag.connections if x.topic in topics]
         else:
@@ -84,14 +123,16 @@ class Bag1Interface:
             )
             return None
 
-        for connection, timestamp, rawdata in self._bag.messages(
-            connections=connections
-        ):
-            msg = self._typestore.deserialize_ros1(rawdata, connection.msgtype)
-            if start_time_ns is not None and timestamp < start_time_ns:
-                continue
+        with ProgressTracker(self, start_time_ns, enabled=progress) as tracker:
+            for connection, timestamp, rawdata in self._bag.messages(
+                connections=connections
+            ):
+                msg = self._typestore.deserialize_ros1(rawdata, connection.msgtype)
+                if start_time_ns is not None and timestamp < start_time_ns:
+                    continue
 
-            yield connection.topic, msg, timestamp
+                tracker.update(timestamp)
+                yield connection.topic, msg, timestamp
 
 
 class Bag2Interface:
@@ -112,10 +153,18 @@ class Bag2Interface:
         topics = self._bag.get_all_topics_and_types()
         self._typenames = {x.name: get_message(x.type) for x in topics}
 
+    @property
+    def start_time(self):
+        return self._bag.get_metadata().starting_time.nanoseconds
+
+    @property
+    def duration(self):
+        return self._bag.get_metadata().duration.nanoseconds
+
     def close(self):
         self._bag.close()
 
-    def read_messages(self, topics=None, start_time_ns=None):
+    def read_messages(self, topics=None, start_time_ns=None, progress=True):
         import rosbag2_py
         from rclpy.serialization import deserialize_message
 
@@ -135,12 +184,14 @@ class Bag2Interface:
 
             self._bag.set_filter(rosbag2_py.StorageFilter(topics=topics))
 
-        while self._bag.has_next():
-            topic, data, t = self._bag.read_next()
-            if start_time_ns is not None and t < start_time_ns:
-                continue
+        with ProgressTracker(self, start_time_ns, enabled=progress) as tracker:
+            while self._bag.has_next():
+                topic, data, t = self._bag.read_next()
+                if start_time_ns is not None and t < start_time_ns:
+                    continue
 
-            yield topic, deserialize_message(data, self._typenames[topic]), t
+                tracker.update(t)
+                yield topic, deserialize_message(data, self._typenames[topic]), t
 
 
 def _pairwise_iter(iterable):
@@ -333,6 +384,7 @@ class RosbagDataLoader:
         threshold_us: int = 16000,
         is_bgr: bool = True,
         start_time_ns: Optional[int] = None,
+        progress: bool = False,
         **kwargs,
     ):
         """
@@ -355,6 +407,7 @@ class RosbagDataLoader:
             threshold_us: Comparison threshold when synchronizing images
             is_bgr: Color images are bgr order
             start_time_ns: Time to start the bag at
+            progress: Whether or not to show reader progress
         """
         if rgb_topic is None:
             raise ValueError("rgb_topic required!")
@@ -375,6 +428,7 @@ class RosbagDataLoader:
         self._threshold_us = threshold_us
         self._is_bgr = is_bgr
         self._start_time_ns = start_time_ns
+        self._progress = progress
 
     def open(self):
         """Open the rosbag."""
@@ -451,7 +505,9 @@ class RosbagDataLoader:
         if self._start_time_ns is not None:
             abs_start_time = self._bag.start_time + self._start_time_ns
 
-        bag_iter = self._bag.read_messages(self.topics, abs_start_time)
+        bag_iter = self._bag.read_messages(
+            self.topics, abs_start_time, progress=self._progress
+        )
         if len(self.topics) == 1:
             msg_iter = _single_iter(bag_iter)
         else:
