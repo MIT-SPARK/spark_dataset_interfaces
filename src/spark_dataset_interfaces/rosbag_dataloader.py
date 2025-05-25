@@ -3,7 +3,6 @@
 import functools
 import logging
 import pathlib
-from collections import deque
 from typing import Optional
 
 import imageio.v3
