@@ -273,19 +273,17 @@ def _all_nonempty(queues):
     return functools.reduce(lambda x, y: x and y, [bool(q) for q in queues], True)
 
 
-def _build_stamps(queues):
-    stamps = []
-    for q in queues:
-        curr_times = deque()
-        for msg in q:
-            curr_times.append(_parse_stamp(msg))
+def _valid_set(stamps, max_diff_ns):
+    for i in range(len(stamps)):
+        for j in range(i, len(stamps)):
+            diff_ns = abs(stamps[i] - stamps[j])
+            if diff_ns >= max_diff_ns:
+                return False
 
-        stamps.append(curr_times)
-
-    return stamps
+    return True
 
 
-def _synced_iter(bag_iter, topics, max_diff_ns, queue_size=20):
+def _synced_iter(bag_iter, topics, max_diff_ns):
     seen = set([])
     queues = [SortedKeyList(key=_parse_stamp) for _ in topics]
     queue_lookup = {t: idx for idx, t in enumerate(topics)}
@@ -298,13 +296,14 @@ def _synced_iter(bag_iter, topics, max_diff_ns, queue_size=20):
             continue
 
         queues[idx].add(msg)
-        if len(queues[idx]) > queue_size:
-            queues[idx].pop(0)
 
-        if not _all_nonempty(queues):
-            continue
+        while _all_nonempty(queues):
+            stamps = [_parse_stamp(q[0]) for q in queues]
+            if not _valid_set(stamps, max_diff_ns):
+                queues[np.argmin(stamps)].pop(0)
+                continue
 
-        stamps = _build_stamps(queues)
+            yield tuple(q.pop(0) for q in queues)
 
 
 def _unpack(messages):
